@@ -2,10 +2,11 @@
 """Projeto web utilizando Flask e Flask-login."""
 
 
-from flask import Flask, render_template, request
-from flask_login import login_required, login_user
+from flask import Flask, redirect, render_template, request, url_for
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from flask_login import LoginManager, login_required, login_user, logout_user
 from wtforms import Form, PasswordField, StringField, SubmitField
 
 app = Flask(__name__)
@@ -16,13 +17,17 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite'
 
 db = SQLAlchemy(app)
 
+login_manager = LoginManager()
+
+login_manager.init_app(app)
+
 
 class Usuario(db.Model):
     """Classe para criação da tabela usuário no banco."""
 
     __tablename__ = 'usuario'
 
-    _id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    _id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50))
     password = db.Column(db.String(50))
     admin = db.Column(db.Boolean, default=False, nullable=False)
@@ -37,7 +42,7 @@ class Usuario(db.Model):
         return not self.is_authenticated()
 
     def get_id(self):
-        return chr(self.id)
+        return chr(self._id)
 
     def __init__(self, username, password, admin):
         db.create_all()
@@ -70,28 +75,30 @@ class Cadastro(Form):
 @app.route('/login')
 def login():
     """Rota inicial, exibe o template do formulário."""
+    logout_user()
     return render_template('login.html', form=Login())
 
 
 @app.route('/check_login', methods=['POST'])
 def check_login():
     """Rota para validar dados do formulário."""
-    if validate_login(user=request.form['username'],
-                      senha=request.form['password']):
-        login_user(True)
-        return 'Deu bom!'
-    return 'Usuário ou senha inválido!'
+    if validate_login(request.form['login'], request.form['password']):
+        return redirect(url_for('logado'))
+    return render_template('login.html', form=Login(), error=True)
 
 
 def validate_login(user, senha):
     """Função de validação dos dados do formulário."""
-    return db.session.query(Usuario).filter_by(
-        username=user, password=senha).first()
+    user = db.session.query(Usuario).filter_by(
+        username=user).first()
+    login_user(user)
+    return check_password_hash(user.password, senha)
 
 
 @app.route('/')
 def home():
     """Rota inicial, com formulário para cadastro."""
+    logout_user()
     return render_template('cadastro.html', form=Cadastro())
 
 
@@ -112,9 +119,14 @@ def checar_cadastro():
 
 @app.route('/logado')
 @login_required
-def logado(current_user):
+def logado():
     """Rota inicial após a realização de login."""
     return 'Logado com sucesso!!'
+
+
+@login_manager.user_loader
+def load_user(id):
+    return Usuario.query.filter_by(_id=ord(id)).first()
 
 
 if __name__ == '__main__':
